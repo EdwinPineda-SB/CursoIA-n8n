@@ -53,7 +53,7 @@ NUM_END | COD_ACCES | MCA_BAJA | NUM_POL1     | COD_CIA | COD_RAMO
 ..
 ..
 /* ============================================================
-   PROCESO: Error desconocido al intentar recuperar la información de accesorios del vehículo asociado a la póliza XXXXXXXX - ORA-20025: ORA-06512: at "OPS$PUMA.SIM_PCK_AUTOS_CLTVAS_RGOSRENOV", line 1190
+   PROCESO: Error desconocido al intentar recuperar la información de accesorios del vehículo asociado a la póliza XXXXXXXX - ORA-20025: ORA-06512: at "OPS$PUMA.SIM_PCK_AUTOS_CLTVAS_RGOSRENOV", line 1190 , jira referencia MDSB-846470
    USO: Agentes Nivel 1 desde n8n
    OBJETIVO: Identificar accesorios con cod_acces inválido
    ============================================================ */
@@ -93,5 +93,95 @@ NUM_SECU_POL | COD_RIES | COD_ACCES | DESC_ACCES     |
       usuario está cargando en Simon Web
    ------------------------------------------------------------ */
 ..
+..
+..
+..
+/* ============================================================
+   PROCESO: Error póliza de autos tiene la fecha de vigencia incorrecta, JIRA REFERENCIA MDSB-633504
+   USO: Agentes Nivel 1 desde n8n
+   OBJETIVO: Identificar inconsistencias en la fehca de vigencia de la póliza, esta fecha debe ser la misma sin importar de haber creado un nuevo endoso, debe ser la misma desde la emisión.
+   ============================================================ */
+/* ------------------------------------------------------------
+   PASO 1. se debe consultar desde qué endoso se hizo el cambio de fecha de vigencia y que el campo cod_end sea 730.
+   ------------------------------------------------------------ */
 
+	SELECT * FROM a2000030 a 
+	WHERE a.cod_cia=3
+	AND a.COD_SECC =1
+	AND a.cod_end=730
+	AND a.num_pol1 IS NOT NULL
+	AND a.fecha_emi_end >= sysdate-360
+	AND EXISTS (SELECT '' FROM a2000030 b WHERE b.NUM_SECU_POL=a.NUM_SECU_POL AND b.num_end = a.num_end-1 
+	AND b.fecha_vig_pol != a.fecha_vig_pol);
+
+
+/* ------------------------------------------------------------
+   PASO 2. INTERPRETACIÓN DE RESULTADOS
+   Reglas:
+     1. Si la consulta anterior trae registros, tomar el número de póliza y consultar en la tabla A2000030 y a2000163 y validar cuáles son los endosos que tienen el campo FECHA_VIG_POL erróneo.
+   ------------------------------------------------------------ */
+
+	SELECT a.FECHA_VIG_POL, a.* FROM a2000030 a
+	WHERE  a.num_pol1 IN (&num_pol1);----num_Pol1
+	 
+	SELECT a.FECHA_VIG_POL, a.* FROM a2000163 a
+	WHERE  a.num_secu_pol IN (&num_secu_pol);----num_secu_pol
+
+/* ------------------------------------------------------------
+   PASO 3. ACCIONES PARA SOLUCIONAR EJECUTAR EL SIGUIENTE SCRIPT
+   -   
+   ------------------------------------------------------------ */
+   
+   
+		SET SERVEROUTPUT ON SIZE 1000000
+		SET LINESIZE 2300
+		SET PAGESIZE 10000
+		SET HEADING ON
+		SET NUMWIDTH 17
+		SET FEEDBACK ON
+		SET trimspool ON
+		SET TRIM ON
+		SET COLSEP ';' 
+		DEFINE Ruta=&1;
+		SPOOL &ruta;
+		DECLARE
+			l_cant_reg_seg   NUMBER := 11; -- definir aqui la cantidad maxima de registros que se espera modificar
+			reporegistros    NUMBER := 0;
+		BEGIN
+			dbms_output.enable(NULL);
+			dbms_output.put_line('INICIA PROCESO ' || to_char(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+		 
+			UPDATE a2000030
+			SET fecha_vig_pol =  TO_DATE('31072024','DDMMYYYY') 
+			WHERE NUM_SECU_POL =29808157160 AND num_end>=3;
+			reporegistros := reporegistros + SQL%ROWCOUNT;--5
+		 
+			UPDATE a2000163
+			SET FECHA_VIG_POL = TO_DATE('31072024','DDMMYYYY') 
+			WHERE NUM_SECU_POL =29808157160 AND NUM_FACTURA >=3;
+			reporegistros := reporegistros + SQL%ROWCOUNT;--6
+		 
+		 
+			IF reporegistros = l_cant_reg_seg THEN
+				dbms_output.put_line(reporegistros || ' REGISTROS ACTUALIZADOS CON EXITO.');
+				COMMIT;
+			ELSE
+				dbms_output.put_line('<<<<<<<<<<< ERROR AL ACTUALIZAR ' || reporegistros || ' REGISTROS.');
+				ROLLBACK;
+			END IF;
+			dbms_output.put_line('TERMINA PROCESO ' || to_char(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+		EXCEPTION
+			WHEN OTHERS THEN
+				dbms_output.put_line('<<<<<<<<<<< HA OCURRIDO UN ERROR: ' || SQLERRM);
+				dbms_output.put_line('TERMINA PROCESO ' || to_char(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+				ROLLBACK;
+		END;
+		/
+		SPOOL OFF
+		PAUSE Presione una tecla para terminar ejecucion
+		EXIT
+		
+		
+		
+..
 ..
